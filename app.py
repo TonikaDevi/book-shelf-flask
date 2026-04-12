@@ -15,7 +15,7 @@ DATABASE = os.path.join(BASE_DIR, 'db', 'books.db')
 # -----------------------------
 # MongoDB (Reviews) - Local
 # -----------------------------
-MONGO_URI = "mongodb://127.0.0.1:27017"
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017")
 mongo_client = MongoClient(MONGO_URI)
 mongo_db = mongo_client["book_shelf_app"]
 reviews_col = mongo_db["reviews"]
