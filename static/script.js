@@ -1,31 +1,29 @@
+// --------------------
+// Global state
+// --------------------
 let allBooks = [];
 let currentPage = 1;
 const booksPerPage = 6;
 
 // --------------------
-// On load
+// Helpers
 // --------------------
-window.addEventListener("DOMContentLoaded", () => {
-  // Load books and reviews on startup
-  showAllBooks();
-  loadReviews();
+function $(id) {
+  return document.getElementById(id);
+}
 
-  const sb = document.getElementById("searchBar");
-  if (sb) {
-    sb.addEventListener("input", () => {
-      searchBooks(sb.value.trim());
-    });
-  }
-});
+function safeText(v) {
+  return (v === null || v === undefined) ? "" : String(v);
+}
 
 // --------------------
-// Add Book (SQLite)
+// Add Book
 // --------------------
-function addBook() {
-  const bookTitle = document.getElementById("bookTitle").value.trim();
-  const publicationYear = document.getElementById("publicationYear").value.trim();
-  const authorName = document.getElementById("authorName").value.trim();
-  const imageUrl = document.getElementById("imageUrl").value.trim();
+async function addBook() {
+  const bookTitle = $("bookTitle").value.trim();
+  const publicationYear = $("publicationYear").value.trim();
+  const authorName = $("authorName").value.trim();
+  const imageUrl = $("imageUrl").value.trim();
 
   if (!bookTitle) {
     alert("Book title cannot be empty.");
@@ -47,76 +45,68 @@ function addBook() {
     return;
   }
 
-  // Validate URL only if provided
-  if (imageUrl.length > 0) {
-    try {
-      new URL(imageUrl);
-    } catch {
-      alert("Please enter a valid Image URL (must start with http/https).");
+  try {
+    const res = await fetch("/api/add", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: bookTitle,
+        publication_year: publicationYear,
+        author_name: authorName,
+        image_url: imageUrl
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || "Failed to add book");
       return;
     }
-  }
 
-  fetch("/api/add", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      title: bookTitle,
-      publication_year: publicationYear,
-      author_name: authorName,
-      image_url: imageUrl
-    }),
-  })
-    .then((r) => r.json())
-    .then((data) => {
-      if (data.error) {
-        alert("Error: " + data.error);
-        return;
-      }
-      document.getElementById("bookTitle").value = "";
-      document.getElementById("publicationYear").value = "";
-      document.getElementById("authorName").value = "";
-      document.getElementById("imageUrl").value = "";
-      showAllBooks();
-    })
-    .catch((err) => {
-      console.error(err);
-      alert("Add book failed. Check console.");
-    });
+    // clear inputs
+    $("bookTitle").value = "";
+    $("publicationYear").value = "";
+    $("authorName").value = "";
+    $("imageUrl").value = "";
+
+    // refresh list
+    await showAllBooks();
+  } catch (err) {
+    console.error(err);
+    alert("Network error while adding book");
+  }
 }
 
 // --------------------
-// Books: Show All + Search + Render + Pagination
+// Fetch All Books
 // --------------------
-function showAllBooks() {
-  fetch("/api/books")
-    .then((r) => r.json())
-    .then((data) => {
-      allBooks = data.books || [];
-      currentPage = 1;
-      renderPage();
-    })
-    .catch((err) => console.error(err));
-}
+async function showAllBooks() {
+  try {
+    const res = await fetch("/api/books");
+    const data = await res.json();
 
-function searchBooks(query) {
-  if (query.length === 0) {
-    showAllBooks();
-    return;
+    if (!res.ok) {
+      console.error("API error:", data);
+      alert(data.error || "Error fetching books");
+      return;
+    }
+
+    allBooks = Array.isArray(data.books) ? data.books : [];
+    currentPage = 1;
+    renderPage();
+  } catch (err) {
+    console.error(err);
+    alert("Network error while fetching books");
   }
-
-  fetch(`/api/search?q=${encodeURIComponent(query)}`)
-    .then((r) => r.json())
-    .then((data) => {
-      allBooks = data.books || [];
-      currentPage = 1;
-      renderPage();
-    })
-    .catch((err) => console.error(err));
 }
 
+// --------------------
+// Render Current Page
+// --------------------
 function renderPage() {
-  const bookGrid = document.getElementById("allbooks");
+  const bookGrid = $("allbooks");
+  if (!bookGrid) return;
+
   bookGrid.innerHTML = "";
 
   const start = (currentPage - 1) * booksPerPage;
@@ -124,28 +114,35 @@ function renderPage() {
   const paginatedBooks = allBooks.slice(start, end);
 
   if (paginatedBooks.length === 0) {
-    bookGrid.innerHTML = `<div class="text-muted p-3">No books found.</div>`;
+    bookGrid.innerHTML = `<div style="padding:16px;">No books found.</div>`;
     updatePaginationButtons();
     return;
   }
 
   paginatedBooks.forEach((book) => {
-    const bookElement = document.createElement("div");
-    bookElement.classList.add("book-card");
+    const card = document.createElement("div");
+    card.classList.add("book-card");
 
-    bookElement.innerHTML = `
-      ${book.image_url ? `<img src="${book.image_url}" alt="Book cover" class="book-img">` : ""}
-      <p class="book-title">${book.title}</p>
-      <p class="book-author">${book.author_name || "N/A"}</p>
-      <p class="book-year">Published: ${book.publication_year}</p>
+    const imgHtml = book.image_url
+      ? `<img src="${book.image_url}" alt="Book cover" class="book-img" onerror="this.style.display='none';" />`
+      : "";
+
+    card.innerHTML = `
+      ${imgHtml}
+      <h3>${safeText(book.title)}</h3>
+      <p><strong>Author:</strong> ${safeText(book.author_name) || "N/A"}</p>
+      <p><strong>Year:</strong> ${safeText(book.publication_year)}</p>
     `;
 
-    bookGrid.appendChild(bookElement);
+    bookGrid.appendChild(card);
   });
 
   updatePaginationButtons();
 }
 
+// --------------------
+// Pagination Controls
+// --------------------
 function nextPage() {
   if (currentPage * booksPerPage < allBooks.length) {
     currentPage++;
@@ -161,85 +158,62 @@ function previousPage() {
 }
 
 function updatePaginationButtons() {
-  const prevBtn = document.getElementById("prevBtn");
-  const nextBtn = document.getElementById("nextBtn");
+  const prevBtn = $("prevBtn");
+  const nextBtn = $("nextBtn");
 
-  prevBtn.disabled = currentPage === 1;
-  nextBtn.disabled = currentPage * booksPerPage >= allBooks.length;
+  if (prevBtn) prevBtn.disabled = currentPage === 1;
+  if (nextBtn) nextBtn.disabled = currentPage * booksPerPage >= allBooks.length;
 }
 
 // --------------------
-// Reviews (MongoDB): Load + Add
+// Search (optional: if your backend has /api/search?q= )
 // --------------------
-function loadReviews() {
-  fetch("/api/reviews")
-    .then((r) => r.json())
-    .then((data) => {
-      const list = document.getElementById("reviewsList");
-      list.innerHTML = "";
-
-      const reviews = data.reviews || [];
-      if (reviews.length === 0) {
-        list.innerHTML = `<div class="text-muted">No reviews yet.</div>`;
-        return;
-      }
-
-      reviews.forEach((rv) => {
-        const ratingText =
-          rv.rating !== undefined && rv.rating !== null && rv.rating !== ""
-            ? `⭐ ${rv.rating}`
-            : "";
-
-        const item = document.createElement("div");
-        item.className = "review-card";
-        item.innerHTML = `
-          <div class="review-header">
-            <strong>${rv.book_title || "Untitled Book"}</strong>
-            <span class="text-muted">${ratingText}</span>
-          </div>
-          <div class="text-muted small">By: ${rv.reviewer || "Unknown"}</div>
-          <div class="mt-1">${rv.review_text || ""}</div>
-        `;
-        list.appendChild(item);
-      });
-    })
-    .catch((err) => console.error("Load reviews error:", err));
-}
-
-function addReview() {
-  const bookTitle = document.getElementById("reviewBookTitle").value.trim();
-  const reviewer = document.getElementById("reviewerName").value.trim();
-  const rating = document.getElementById("reviewRating").value.trim();
-  const reviewText = document.getElementById("reviewText").value.trim();
-
-  if (!bookTitle || !reviewer || !reviewText) {
-    alert("Book Title, Reviewer, and Review Text are required.");
+async function runSearch(q) {
+  const query = q.trim();
+  if (!query) {
+    await showAllBooks();
     return;
   }
 
-  fetch("/api/reviews/add", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      book_title: bookTitle,
-      reviewer: reviewer,
-      rating: rating ? Number(rating) : null,
-      review_text: reviewText,
-    }),
-  })
-    .then((r) => r.json())
-    .then((data) => {
-      if (data.error) {
-        alert("Error: " + data.error);
-        return;
-      }
+  try {
+    const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+    const data = await res.json();
 
-      document.getElementById("reviewBookTitle").value = "";
-      document.getElementById("reviewerName").value = "";
-      document.getElementById("reviewRating").value = "";
-      document.getElementById("reviewText").value = "";
+    if (!res.ok) {
+      console.error("Search API error:", data);
+      alert(data.error || "Search failed");
+      return;
+    }
 
-      loadReviews();
-    })
-    .catch((err) => console.error("Add review error:", err));
+    allBooks = Array.isArray(data.books) ? data.books : [];
+    currentPage = 1;
+    renderPage();
+  } catch (err) {
+    console.error(err);
+    alert("Network error while searching");
+  }
 }
+
+// --------------------
+// Wire up events (fixes button not working)
+// --------------------
+window.addEventListener("DOMContentLoaded", () => {
+  // Make button work even if inline onclick fails
+  const showBtn = $("showBooksButton");
+  if (showBtn) showBtn.addEventListener("click", showAllBooks);
+
+  const prevBtn = $("prevBtn");
+  if (prevBtn) prevBtn.addEventListener("click", previousPage);
+
+  const nextBtn = $("nextBtn");
+  if (nextBtn) nextBtn.addEventListener("click", nextPage);
+
+  // Search bar typing
+  const searchBar = $("searchBar");
+  if (searchBar) {
+    searchBar.addEventListener("input", (e) => runSearch(e.target.value));
+  }
+
+  // Auto-load books on page load
+  showAllBooks();
+});
